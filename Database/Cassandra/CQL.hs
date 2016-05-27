@@ -313,8 +313,8 @@ defaultConfig servers keyspace auth = PoolConfig {
                   piBackoffOnError = defaultBackoffOnError,
                   piMaxSessionIdleTime = defaultMaxSessionIdleTime,
                   piMaxSessions = defaultMaxSessions,
-                  piDebugLog = \_ _ = return (),
-                  piWarnLog = \_ _ = return ()
+                  piDebugLog = \_ _ -> return (),
+                  piWarnLog = \_ _ -> return ()
                 }
 
 
