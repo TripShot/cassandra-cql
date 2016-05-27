@@ -1,5 +1,5 @@
 name:                cassandra-cql
-version:             0.5.0.2
+version:             0.5.0.3
 synopsis:            Haskell client for Cassandra's CQL protocol
 description:         Haskell client for Cassandra's CQL protocol.
 license:             BSD3
@@ -43,8 +43,7 @@ library
                        uuid             >= 1.2.0,
                        time             >= 1.4.0.0,
                        Decimal          >= 0.3.0,
-                       resource-pool    >= 0.2.3,
-                       hslogger         >= 1.2
+                       resource-pool    >= 0.2.3
 
   ghc-options:         -Wall -fno-warn-name-shadowing -fno-warn-unused-matches
                        -fno-warn-missing-signatures -fno-warn-orphans
