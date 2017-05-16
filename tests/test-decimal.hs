@@ -2,7 +2,7 @@
 
 import Database.Cassandra.CQL
 import Control.Monad
-import Control.Monad.CatchIO
+import Control.Monad.Catch
 import Control.Monad.Trans (liftIO)
 import Data.Int
 import Data.Text (Text)

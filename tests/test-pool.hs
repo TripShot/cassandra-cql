@@ -5,7 +5,7 @@ import Control.Concurrent (threadDelay, forkIO)
 import Control.Concurrent.MVar
 import Control.Exception (SomeException)
 import Control.Monad (replicateM, forM, unless)
-import Control.Monad.CatchIO (throw, catch)
+import Control.Monad.Catch (throw, catch)
 import Control.Monad.Trans (liftIO)
 import Data.Text (Text, pack)
 import Data.UUID (UUID)

@@ -2,7 +2,7 @@
 
 import Database.Cassandra.CQL
 import Control.Monad
-import Control.Monad.CatchIO
+import Control.Monad.Catch
 import Control.Monad.Trans (liftIO)
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as C
