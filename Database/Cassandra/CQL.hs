@@ -581,15 +581,16 @@ data Frame a = Frame {
 timeout' :: NominalDiffTime -> IO a -> IO a
 timeout' to = timeout (floor $ to * 1000000) >=> maybe (throwIO CoordinatorTimeout) return
 
-recvAll :: NominalDiffTime -> Socket -> Int -> IO ByteString
-recvAll ioTimeout s n = timeout' ioTimeout $ do
+recvAll :: Int -> NominalDiffTime -> Socket -> Int -> IO ByteString
+recvAll c ioTimeout s n = timeout' ioTimeout $ do
+    putStrLn $ "recvAll (c, n) : " ++ show (c, n)
     bs <- recv s n
     when (B.null bs) $ throwM ShortRead
     let left = n - B.length bs
     if left == 0
         then return bs
         else do
-            bs' <- recvAll ioTimeout s left
+            bs' <- recvAll (c + 1) ioTimeout s left
             return (bs `B.append` bs')
 
 protocolVersion :: Word8
@@ -599,7 +600,7 @@ recvFrame :: Text -> StateT ActiveSession IO (Frame ByteString)
 recvFrame qt = do
     s <- gets actSocket
     ioTimeout <- gets actIoTimeout
-    hdrBs <- liftIO $ recvAll ioTimeout s 8
+    hdrBs <- liftIO $ recvAll 0 ioTimeout s 8
     case runGet parseHeader hdrBs of
         Left err -> throwM $ LocalProtocolError ("recvFrame: " `T.append` T.pack err) qt
         Right (ver0, flags, stream, opcode, length) -> do
@@ -608,7 +609,7 @@ recvFrame qt = do
                 throwM $ LocalProtocolError ("unexpected version " `T.append` T.pack (show ver)) qt
             body <- if length == 0
                 then pure B.empty
-                else liftIO $ recvAll ioTimeout s (fromIntegral length)
+                else liftIO $ recvAll 0 ioTimeout s (fromIntegral length)
             --liftIO $ putStrLn $ hexdump 0 (C.unpack $ hdrBs `B.append` body)
             return $ Frame flags stream opcode body
   `catch` \exc -> throwM $ CassandraIOException exc
