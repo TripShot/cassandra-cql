@@ -164,6 +164,8 @@ import qualified Control.Monad.Writer
 import Crypto.Hash (hash, Digest, SHA1)
 import Data.Bits
 import Data.ByteString (ByteString)
+import Data.ByteString.Builder (toLazyByteString, byteString)
+import Data.ByteString.Lazy (toStrict)
 import qualified Data.ByteString.Char8 as C8BS
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as L
@@ -581,17 +583,21 @@ data Frame a = Frame {
 timeout' :: NominalDiffTime -> IO a -> IO a
 timeout' to = timeout (floor $ to * 1000000) >=> maybe (throwIO CoordinatorTimeout) return
 
-recvAll :: Int -> NominalDiffTime -> Socket -> Int -> IO ByteString
-recvAll c ioTimeout s n = timeout' ioTimeout $ do
-    putStrLn $ "recvAll (c, n) : " ++ show (c, n)
-    bs <- recv s n
-    when (B.null bs) $ throwM ShortRead
-    let left = n - B.length bs
-    if left == 0
-        then return bs
-        else do
-            bs' <- recvAll (c + 1) ioTimeout s left
-            return (bs `B.append` bs')
+recvAll :: NominalDiffTime -> Socket -> Int -> IO ByteString
+recvAll ioTimeout s n = timeout' ioTimeout $ do
+  let loop bldr r = do
+        chunk <- recv s (min r 16384)
+        when (B.null chunk) $ throwM ShortRead
+        let left = r - B.length chunk
+            bldr' = bldr <> byteString chunk
+        when (left < 0) $ throwM $ LocalProtocolError "recvAll : invariant failure : more bytes returned than requested" "<IO>"
+        if left == 0
+           then if B.length chunk == n
+                then return chunk -- Avoid unnecessary copying in the common case when all bytes are received in one request.
+                else return . toStrict . toLazyByteString $ bldr'
+           else loop bldr' left
+
+  loop mempty n
 
 protocolVersion :: Word8
 protocolVersion = 2
@@ -600,7 +606,7 @@ recvFrame :: Text -> StateT ActiveSession IO (Frame ByteString)
 recvFrame qt = do
     s <- gets actSocket
     ioTimeout <- gets actIoTimeout
-    hdrBs <- liftIO $ recvAll 0 ioTimeout s 8
+    hdrBs <- liftIO $ recvAll ioTimeout s 8
     case runGet parseHeader hdrBs of
         Left err -> throwM $ LocalProtocolError ("recvFrame: " `T.append` T.pack err) qt
         Right (ver0, flags, stream, opcode, length) -> do
@@ -609,7 +615,7 @@ recvFrame qt = do
                 throwM $ LocalProtocolError ("unexpected version " `T.append` T.pack (show ver)) qt
             body <- if length == 0
                 then pure B.empty
-                else liftIO $ recvAll 0 ioTimeout s (fromIntegral length)
+                else liftIO $ recvAll ioTimeout s (fromIntegral length)
             --liftIO $ putStrLn $ hexdump 0 (C.unpack $ hdrBs `B.append` body)
             return $ Frame flags stream opcode body
   `catch` \exc -> throwM $ CassandraIOException exc
