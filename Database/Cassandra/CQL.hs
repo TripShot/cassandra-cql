@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings, GeneralizedNewtypeDeriving, ScopedTypeVariables,
         FlexibleInstances, DeriveDataTypeable, UndecidableInstances,
-        BangPatterns, OverlappingInstances, DataKinds, GADTs, KindSignatures, NamedFieldPuns #-}
+        BangPatterns, DataKinds, GADTs, KindSignatures, NamedFieldPuns #-}
 -- | Haskell client for Cassandra's CQL protocol
 --
 -- For examples, take a look at the /tests/ directory in the source archive.
@@ -159,7 +159,7 @@ import Control.Monad.Catch hiding (mask)
 import Control.Monad.Reader
 import Control.Monad.State hiding (get, put)
 import qualified Control.Monad.RWS
-import qualified Control.Monad.Error
+import qualified Control.Monad.Except
 import qualified Control.Monad.Writer
 import Crypto.Hash (hash, Digest, SHA1)
 import Data.Bits
@@ -195,7 +195,7 @@ import Data.UUID (UUID)
 import qualified Data.UUID as UUID
 import Data.Word
 import Network.Socket (Socket, HostName, ServiceName, getAddrInfo, socket, AddrInfo(..),
-    connect, sClose, SockAddr(..), SocketType(..), defaultHints)
+    connect, close, SockAddr(..), SocketType(..), defaultHints)
 import Network.Socket.ByteString (sendAll, recv)
 import Numeric
 import Unsafe.Coerce
@@ -293,7 +293,7 @@ instance MonadCassandra m => MonadCassandra (Control.Monad.Reader.ReaderT a m) w
 instance MonadCassandra m => MonadCassandra (Control.Monad.State.StateT a m) where
     getCassandraPool = lift getCassandraPool
 
-instance (MonadCassandra m, Control.Monad.Error.Error e) => MonadCassandra (Control.Monad.Error.ErrorT e m) where
+instance (MonadCassandra m) => MonadCassandra (Control.Monad.Except.ExceptT e m) where
     getCassandraPool = lift getCassandraPool
 
 instance (MonadCassandra m, Monoid a) => MonadCassandra (Control.Monad.Writer.WriterT a m) where
@@ -447,7 +447,7 @@ newSession poolState@PoolState { psConfig, psServers } = do
 destroySession :: PoolState -> Session -> IO ()
 destroySession PoolState { psServers } Session { sessSocket, sessServerIndex } = mask $ \restore -> do
                                                                                    atomically $ modifyTVar' psServers (Seq.adjust (\s -> s { ssSessionCount = ssSessionCount s - 1 }) sessServerIndex)
-                                                                                   restore (sClose sessSocket)
+                                                                                   restore (close sessSocket)
 
 
 
@@ -462,7 +462,7 @@ setupConnection PoolState { psConfig } serverIndex server = do
 
     ais <- getAddrInfo (Just hints) (Just host) (Just service)
 
-    bracketOnError (connectSocket startTime ais) (maybe (return ()) sClose) buildSession
+    bracketOnError (connectSocket startTime ais) (maybe (return ()) close) buildSession
 
     where connectSocket startTime ais =
               foldM (\mSocket ai -> do
@@ -475,9 +475,9 @@ setupConnection PoolState { psConfig } serverIndex server = do
 
                                       -- No need to use 'bracketOnError' here because we are already masked.
                                       s <- socket (addrFamily ai) (addrSocketType ai) (addrProtocol ai)
-                                      mConn <- timeout ((floor $ (piConnectionTimeout psConfig) * 1000000) :: Int) (connect s (addrAddress ai)) `onException` sClose s
+                                      mConn <- timeout ((floor $ (piConnectionTimeout psConfig) * 1000000) :: Int) (connect s (addrAddress ai)) `onException` close s
                                       case mConn of
-                                        Nothing -> sClose s >> return Nothing
+                                        Nothing -> close s >> return Nothing
                                         Just _ -> return $ Just s
 
                            now <- getCurrentTime
@@ -828,7 +828,7 @@ introduce PoolConfig { piKeyspace, piAuth }  = do
       op -> throwM $ LocalProtocolError ("introduce: unexpected opcode " `T.append` T.pack (show op)) qt
 
     let Keyspace ksName = piKeyspace
-    let q = query $ "USE " `T.append` ksName :: Query Rows () ()
+    let q = query $ "USE " `T.append` ksName :: Query 'Rows () ()
     res <- executeInternal q () ONE
     case res of
         SetKeyspace ks -> return ()
@@ -1131,7 +1131,7 @@ instance CasType SockAddr where
              SockAddrInet _ w -> putWord32le w
              SockAddrInet6 _ _ (a,b,c,d) _ -> putWord32be a >> putWord32be b
                                            >> putWord32be c >> putWord32be d
-             _ -> fail $ "address type not supported in formatting Inet: " ++ show sa
+             _ -> error $ "address type not supported in formatting Inet: " ++ show sa
     casType _ = CInet
 
 instance CasType a => CasType [a] where
@@ -1390,7 +1390,7 @@ instance CasValues () where
     encodeValues () types = encodeNested 0 () types
     decodeValues vs = decodeNested 0 vs
 
-instance CasType a => CasValues a where
+instance {-# OVERLAPS #-} CasType a => CasValues a where
     encodeValues a = encodeNested 0 (a, ())
     decodeValues vs = (\(a, ()) -> a) <$> decodeNested 0 vs
 
@@ -1607,7 +1607,7 @@ executeInternal query i cons = do
 -- | Execute a query that returns rows.
 executeRows :: (MonadCassandra m, CasValues i, CasValues o) =>
                Consistency     -- ^ Consistency level of the operation
-            -> Query Rows i o  -- ^ CQL query to execute
+            -> Query 'Rows i o  -- ^ CQL query to execute
             -> i               -- ^ Input values substituted in the query
             -> m [o]
 executeRows cons q i = do
@@ -1619,7 +1619,7 @@ executeRows cons q i = do
 -- | Execute a lightweight transaction. The consistency level is implicit and
 -- is SERIAL.
 executeTrans :: (MonadCassandra m, CasValues i) =>
-                Query Write i () -- ^ CQL query to execute
+                Query 'Write i () -- ^ CQL query to execute
              -> i                -- ^ Input values substituted in the query
              -> m Bool
 executeTrans q i = do
@@ -1635,14 +1635,14 @@ executeTrans q i = do
 -- to be returned.
 executeRow :: (MonadCassandra m, CasValues i, CasValues o) =>
               Consistency     -- ^ Consistency level of the operation
-           -> Query Rows i o  -- ^ CQL query to execute
+           -> Query 'Rows i o  -- ^ CQL query to execute
            -> i               -- ^ Input values substituted in the query
            -> m (Maybe o)
 executeRow cons q i = do
     rows <- executeRows cons q i
     return $ listToMaybe rows
 
-decodeRows :: (MonadCatch m, CasValues values) => Query Rows any_i values -> Metadata -> [[Maybe ByteString]] -> m [values]
+decodeRows :: (MonadCatch m, CasValues values) => Query 'Rows any_i values -> Metadata -> [[Maybe ByteString]] -> m [values]
 decodeRows query meta rows0 = do
     let rows1 = flip map rows0 $ \cols -> decodeValues (zip (metadataTypes meta) cols)
     case lefts rows1 of
@@ -1654,7 +1654,7 @@ decodeRows query meta rows0 = do
 -- | Execute a write operation that returns void.
 executeWrite :: (MonadCassandra m, CasValues i) =>
                 Consistency       -- ^ Consistency level of the operation
-             -> Query Write i ()  -- ^ CQL query to execute
+             -> Query 'Write i ()  -- ^ CQL query to execute
              -> i                 -- ^ Input values substituted in the query
              -> m ()
 executeWrite cons q i = do
@@ -1666,7 +1666,7 @@ executeWrite cons q i = do
 -- | Execute a schema change, such as creating or dropping a table.
 executeSchema :: (MonadCassandra m, CasValues i) =>
                  Consistency        -- ^ Consistency level of the operation
-              -> Query Schema i ()  -- ^ CQL query to execute
+              -> Query 'Schema i ()  -- ^ CQL query to execute
               -> i                  -- ^ Input values substituted in the query
               -> m (Change, Keyspace, Table)
 executeSchema cons q i = do
