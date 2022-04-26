@@ -426,7 +426,7 @@ newSession poolState@PoolState { psConfig, psServers } = do
                              if null available
                                then retry
                                else do
-                                 let (idx, best @ ServerState { ssSessionCount }) = minimumBy (compare `on` snd) available
+                                 let (idx, best@ServerState { ssSessionCount }) = minimumBy (compare `on` snd) available
                                      updatedBest = best { ssSessionCount = ssSessionCount + 1 }
 
                                  modifyTVar' psServers (Seq.update idx updatedBest)
