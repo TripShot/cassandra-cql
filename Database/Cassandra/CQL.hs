@@ -171,8 +171,9 @@ import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as L
 import Data.Data
 import Data.Decimal
-import Data.Either (lefts)
+import Data.Either (partitionEithers)
 import Data.Int
+import Data.Kind (Type)
 import Data.List
 import Data.Map (Map)
 import qualified Data.Map as M
@@ -1243,7 +1244,7 @@ data Style = Schema   -- ^ A query that modifies the schema, such as DROP TABLE 
 -- query each represented as a tuple.
 --
 -- The /DataKinds/ language extension is required for 'Style'.
-data Query :: Style -> * -> * -> * where
+data Query :: Style -> Type -> Type -> Type where
     Query :: QueryID -> Text -> Query style i o
     deriving Show
 
@@ -1645,11 +1646,9 @@ executeRow cons q i = do
 decodeRows :: (MonadCatch m, CasValues values) => Query 'Rows any_i values -> Metadata -> [[Maybe ByteString]] -> m [values]
 decodeRows query meta rows0 = do
     let rows1 = flip map rows0 $ \cols -> decodeValues (zip (metadataTypes meta) cols)
-    case lefts rows1 of
-        (err:_) -> throwM $ ValueMarshallingException TransportReceiving (T.pack $ show err) (queryText query)
-        [] -> return ()
-    let rows2 = flip map rows1 $ \(Right v) -> v
-    return $ rows2
+    case partitionEithers rows1 of
+        (err:_ , _)     -> throwM $ ValueMarshallingException TransportReceiving (T.pack $ show err) (queryText query)
+        (_     , rows2) -> pure rows2
 
 -- | Execute a write operation that returns void.
 executeWrite :: (MonadCassandra m, CasValues i) =>
