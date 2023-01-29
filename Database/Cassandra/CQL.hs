@@ -155,6 +155,7 @@ import Control.Applicative
 import Control.Concurrent (threadDelay, forkIO)
 import Control.Concurrent.STM
 import Control.Exception (IOException, SomeException, MaskingState(..), throwIO, getMaskingState, mask)
+import Control.Monad ((>=>), foldM, replicateM, when)
 import Control.Monad.Catch hiding (mask)
 import Control.Monad.Reader
 import Control.Monad.State hiding (get, put)
@@ -172,6 +173,7 @@ import qualified Data.ByteString.Lazy as L
 import Data.Data
 import Data.Decimal
 import Data.Either (partitionEithers)
+import Data.Foldable (forM_)
 import Data.Int
 import Data.Kind (Type)
 import Data.List
